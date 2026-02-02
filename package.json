@@ -1,0 +1,122 @@
+{
+  "name": "dbml-previewer",
+  "displayName": "DBML Previewer",
+  "description": "Preview Entity-Relationship Diagrams from DBML files with interactive visualization",
+  "version": "1.0.0",
+  "publisher": "your-publisher-name",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "dbml",
+    "erd",
+    "database",
+    "diagram",
+    "entity-relationship",
+    "schema",
+    "preview"
+  ],
+  "activationEvents": [
+    "onLanguage:dbml"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dbml-previewer.preview",
+        "title": "DBML: Preview Diagram",
+        "icon": {
+          "light": "resources/icon-light.svg",
+          "dark": "resources/icon-dark.svg"
+        }
+      },
+      {
+        "command": "dbml-previewer.exportSvg",
+        "title": "DBML: Export as SVG"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == dbml",
+          "command": "dbml-previewer.preview",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "when": "resourceLangId == dbml",
+          "command": "dbml-previewer.preview",
+          "group": "navigation"
+        }
+      ]
+    },
+    "languages": [
+      {
+        "id": "dbml",
+        "extensions": [
+          ".dbml"
+        ],
+        "aliases": [
+          "DBML",
+          "Database Markup Language"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "DBML Previewer",
+      "properties": {
+        "dbmlPreviewer.defaultTableColor": {
+          "type": "string",
+          "default": "#3498db",
+          "description": "Default color for tables without a specified color"
+        },
+        "dbmlPreviewer.defaultGroupColor": {
+          "type": "string",
+          "default": "#95a5a6",
+          "description": "Default color for groups without a specified color"
+        },
+        "dbmlPreviewer.backgroundColor": {
+          "type": "string",
+          "default": "#1e1e1e",
+          "description": "Background color of the diagram"
+        },
+        "dbmlPreviewer.showRelationshipLabels": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show relationship labels on connections"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "@dbml/core": "^3.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/dbml-previewer"
+  },
+  "license": "MIT"
+}
