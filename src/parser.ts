@@ -1,5 +1,3 @@
-import { Parser } from '@dbml/core';
-
 export interface Column {
   name: string;
   type: string;
@@ -69,244 +67,352 @@ export interface DBMLSchema {
 
 export class DBMLParser {
   parse(dbmlContent: string): DBMLSchema {
-    try {
-      const parser = new Parser();
-      const database = parser.parse(dbmlContent, 'dbml');
-      return this.transformDatabase(database, dbmlContent);
-    } catch (error) {
-      console.error('Parser error, falling back to manual parse:', error);
-      return this.manualParse(dbmlContent);
-    }
+    return this.manualParse(dbmlContent);
   }
 
-  private transformDatabase(database: any, originalContent: string): DBMLSchema {
-    const schema: DBMLSchema = {
-      tables: [],
-      refs: [],
-      tableGroups: [],
-      enums: [],
-      schemas: []
-    };
+  /**
+   * Remove multi-line Note blocks (Note: '''...''') from content
+   * This prevents note content from being parsed as columns
+   */
+  private removeMultilineNotes(content: string): string {
+    // Remove Note: '''...''' blocks (triple single quotes)
+    let result = content.replace(/Note\s*:\s*'''[\s\S]*?'''/gi, '');
+    // Remove Note: """...""" blocks (triple double quotes)
+    result = result.replace(/Note\s*:\s*"""[\s\S]*?"""/gi, '');
+    return result;
+  }
 
-    const colorMap = this.extractColorsFromContent(originalContent);
-    const groupColorMap = this.extractGroupColorsFromContent(originalContent);
+  /**
+   * Remove single-line Note blocks from content
+   */
+  private removeSingleLineNotes(content: string): string {
+    // Remove Note: '...' or Note: "..."
+    let result = content.replace(/Note\s*:\s*'[^']*'/gi, '');
+    result = result.replace(/Note\s*:\s*"[^"]*"/gi, '');
+    return result;
+  }
 
-    // Process schemas and tables
-    if (database.schemas) {
-      for (const dbSchema of database.schemas) {
-        // Track schema names (except 'public' which is default)
-        if (dbSchema.name && dbSchema.name !== 'public') {
-          schema.schemas.push(dbSchema.name);
+  /**
+   * Extract table body content between { and }, handling nested braces and Note blocks
+   */
+  private extractTableBody(content: string, startPos: number): { body: string; endPos: number } | null {
+    let depth = 0;
+    let inTripleQuote = false;
+    let tripleQuoteChar = '';
+    let inSingleQuote = false;
+    let singleQuoteChar = '';
+    let bodyStart = -1;
+    
+    for (let i = startPos; i < content.length; i++) {
+      const char = content[i];
+      const nextThree = content.substring(i, i + 3);
+      
+      // Handle triple quotes (''' or """)
+      if (!inSingleQuote && (nextThree === "'''" || nextThree === '"""')) {
+        if (!inTripleQuote) {
+          inTripleQuote = true;
+          tripleQuoteChar = nextThree;
+          i += 2;
+          continue;
+        } else if (nextThree === tripleQuoteChar) {
+          inTripleQuote = false;
+          tripleQuoteChar = '';
+          i += 2;
+          continue;
+        }
+      }
+      
+      // Skip if inside triple-quoted string
+      if (inTripleQuote) continue;
+      
+      // Handle single/double quotes (not triple)
+      if ((char === "'" || char === '"') && content.substring(i, i + 3) !== "'''" && content.substring(i, i + 3) !== '"""') {
+        if (i > 0 && content[i - 1] === '\\') continue; // Escaped quote
+        
+        if (!inSingleQuote) {
+          inSingleQuote = true;
+          singleQuoteChar = char;
+        } else if (char === singleQuoteChar) {
+          inSingleQuote = false;
+          singleQuoteChar = '';
+        }
+        continue;
+      }
+      
+      // Skip if inside single-quoted string
+      if (inSingleQuote) continue;
+      
+      // Track braces
+      if (char === '{') {
+        if (depth === 0) {
+          bodyStart = i + 1;
+        }
+        depth++;
+      } else if (char === '}') {
+        depth--;
+        if (depth === 0 && bodyStart !== -1) {
+          return {
+            body: content.substring(bodyStart, i),
+            endPos: i
+          };
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  /**
+   * Parse columns from table body content, properly handling notes and comments
+   */
+  private parseColumns(tableBody: string): Column[] {
+    const columns: Column[] = [];
+    
+    // First, remove all Note blocks from the table body
+    let cleanBody = this.removeMultilineNotes(tableBody);
+    cleanBody = this.removeSingleLineNotes(cleanBody);
+    
+    const lines = cleanBody.split('\n');
+    let inIndexes = false;
+    let indexBraceDepth = 0;
+    
+    for (const line of lines) {
+      let trimmed = line.trim();
+      
+      // Skip empty lines and full-line comments
+      if (!trimmed || trimmed.startsWith('//')) continue;
+      
+      // Remove inline comments
+      const commentIndex = this.findInlineCommentIndex(trimmed);
+      if (commentIndex > 0) {
+        trimmed = trimmed.substring(0, commentIndex).trim();
+      }
+      
+      if (!trimmed) continue;
+      
+      // Handle indexes block
+      if (/^indexes\s*\{?/i.test(trimmed)) {
+        inIndexes = true;
+        if (trimmed.includes('{')) indexBraceDepth++;
+        continue;
+      }
+      
+      if (inIndexes) {
+        if (trimmed.includes('{')) indexBraceDepth++;
+        if (trimmed.includes('}')) indexBraceDepth--;
+        if (indexBraceDepth <= 0) {
+          inIndexes = false;
+          indexBraceDepth = 0;
+        }
+        continue;
+      }
+      
+      // Skip Note keyword lines
+      if (/^Note\s*:/i.test(trimmed)) continue;
+      
+      // Skip lines that are clearly markdown/documentation content
+      if (/^[#*\-]/.test(trimmed)) continue; // Markdown headers/lists
+      if (/^\d+\.\s/.test(trimmed)) continue; // Numbered lists
+      
+      // Parse column definition
+      // Format: column_name type [options]
+      const columnMatch = trimmed.match(/^(\w+)\s+(\w+(?:\s*\([^)]*\))?)\s*(?:\[([^\]]*)\])?/);
+      
+      if (columnMatch) {
+        const colName = columnMatch[1];
+        const colType = columnMatch[2].trim();
+        const options = columnMatch[3] || '';
+        
+        // Skip if column name is a reserved word that's not a column
+        const reservedWords = ['indexes', 'note', 'table', 'ref', 'enum', 'tablegroup', 'project'];
+        if (reservedWords.includes(colName.toLowerCase())) continue;
+        
+        // Validate column type - must look like a real database type
+        if (!this.isValidColumnType(colType)) continue;
+        
+        const column: Column = {
+          name: colName,
+          type: colType,
+          pk: /\bpk\b/i.test(options),
+          unique: /\bunique\b/i.test(options),
+          notNull: /\bnot\s*null\b/i.test(options) || /\bnn\b/i.test(options),
+          increment: /\bincrement\b/i.test(options)
+        };
+        
+        // Extract note from options
+        const noteMatch = options.match(/note\s*:\s*['"]([^'"]*)['"]/i);
+        if (noteMatch) {
+          column.note = noteMatch[1];
         }
         
-        if (dbSchema.tables) {
-          for (const table of dbSchema.tables) {
-            const schemaName = dbSchema.name !== 'public' ? dbSchema.name : undefined;
-            const fullTableName = schemaName ? `${schemaName}.${table.name}` : table.name;
-            
-            const tableDef: Table = {
-              name: table.name,
-              alias: table.alias || undefined,
-              columns: [],
-              note: table.note || undefined,
-              color: colorMap.get(table.name) || colorMap.get(fullTableName),
-              headerColor: colorMap.get(table.name) || colorMap.get(fullTableName),
-              schema: schemaName
-            };
-
-            if (table.fields) {
-              for (const field of table.fields) {
-                const column: Column = {
-                  name: field.name,
-                  type: this.extractTypeName(field.type),
-                  pk: field.pk || false,
-                  unique: field.unique || false,
-                  notNull: field.not_null || false,
-                  note: field.note || undefined,
-                  default: field.dbdefault?.value || undefined,
-                  increment: field.increment || false
-                };
-                tableDef.columns.push(column);
-              }
-            }
-
-            if (table.indexes) {
-              tableDef.indexes = table.indexes.map((idx: any) => ({
-                name: idx.name,
-                columns: idx.columns?.map((c: any) => c.value) || [],
-                unique: idx.unique || false,
-                pk: idx.pk || false
-              }));
-            }
-
-            schema.tables.push(tableDef);
-          }
+        // Extract default value
+        const defaultMatch = options.match(/default\s*:\s*(?:`([^`]*)`|['"]([^'"]*)['"']|(\w+))/i);
+        if (defaultMatch) {
+          column.default = defaultMatch[1] || defaultMatch[2] || defaultMatch[3];
         }
-
-        // Process enums
-        if (dbSchema.enums) {
-          for (const enumDef of dbSchema.enums) {
-            schema.enums.push({
-              name: enumDef.name,
-              values: enumDef.values?.map((v: any) => ({
-                name: v.name,
-                note: v.note
-              })) || []
-            });
-          }
-        }
+        
+        columns.push(column);
       }
     }
-
-    // Process refs from database object
-    if (database.refs) {
-      for (const ref of database.refs) {
-        if (ref.endpoints && ref.endpoints.length >= 2) {
-          const endpoint0 = ref.endpoints[0];
-          const endpoint1 = ref.endpoints[1];
-          
-          schema.refs.push({
-            name: ref.name,
-            fromTable: endpoint0.tableName,
-            fromColumn: endpoint0.fieldNames?.[0] || '',
-            toTable: endpoint1.tableName,
-            toColumn: endpoint1.fieldNames?.[0] || '',
-            fromRelation: this.mapRelationType(endpoint0.relation),
-            toRelation: this.mapRelationType(endpoint1.relation),
-            onDelete: ref.onDelete,
-            onUpdate: ref.onUpdate
-          });
-        }
-      }
-    }
-
-    // Also extract inline refs from original content
-    const inlineRefs = this.extractInlineRefs(originalContent, schema.tables);
-    for (const ref of inlineRefs) {
-      // Check if ref already exists
-      const exists = schema.refs.some(r => 
-        r.fromTable === ref.fromTable && 
-        r.fromColumn === ref.fromColumn &&
-        r.toTable === ref.toTable &&
-        r.toColumn === ref.toColumn
-      );
-      if (!exists) {
-        schema.refs.push(ref);
-      }
-    }
-
-    // Process table groups
-    schema.tableGroups = this.extractTableGroups(originalContent, groupColorMap);
-
-    // Extract project info
-    const projectMatch = originalContent.match(/Project\s+(\w+)\s*\{([^}]*)\}/i);
-    if (projectMatch) {
-      schema.projectName = projectMatch[1];
-      const noteMatch = projectMatch[2].match(/Note:\s*['"]([^'"]*)['"]/i);
-      if (noteMatch) {
-        schema.projectNote = noteMatch[1];
-      }
-    }
-
-    return schema;
+    
+    return columns;
   }
 
-  private extractTypeName(type: any): string {
-    if (!type) return 'unknown';
-    if (typeof type === 'string') return type;
-    if (type.type_name) {
-      let typeName = type.type_name;
-      if (type.args) {
-        typeName += `(${type.args})`;
+  /**
+   * Find index of inline comment (//) that's not inside a string
+   */
+  private findInlineCommentIndex(line: string): number {
+    let inString = false;
+    let stringChar = '';
+    
+    for (let i = 0; i < line.length - 1; i++) {
+      const char = line[i];
+      
+      if ((char === "'" || char === '"') && (i === 0 || line[i - 1] !== '\\')) {
+        if (!inString) {
+          inString = true;
+          stringChar = char;
+        } else if (char === stringChar) {
+          inString = false;
+          stringChar = '';
+        }
       }
-      return typeName;
+      
+      if (!inString && line.substring(i, i + 2) === '//') {
+        return i;
+      }
     }
-    return 'unknown';
+    
+    return -1;
   }
 
-  private mapRelationType(relation: string): '1' | '*' {
-    if (relation === '*' || relation === 'many') return '*';
-    return '1';
+  /**
+   * Validate if a string looks like a valid column type
+   */
+  private isValidColumnType(type: string): boolean {
+    const normalizedType = type.toLowerCase().replace(/\s+/g, '');
+    
+    // Common SQL types
+    const validTypes = [
+      // Numeric
+      'int', 'integer', 'bigint', 'smallint', 'tinyint', 'mediumint',
+      'decimal', 'numeric', 'float', 'double', 'real', 'number',
+      'serial', 'bigserial', 'smallserial',
+      // String
+      'varchar', 'char', 'text', 'string', 'nvarchar', 'nchar', 'ntext',
+      'clob', 'longtext', 'mediumtext', 'tinytext',
+      // Date/Time
+      'date', 'datetime', 'timestamp', 'time', 'year',
+      'timestamptz', 'timetz', 'interval',
+      // Boolean
+      'boolean', 'bool', 'bit',
+      // Binary
+      'blob', 'binary', 'varbinary', 'bytea', 'longblob', 'mediumblob', 'tinyblob',
+      // JSON
+      'json', 'jsonb',
+      // UUID
+      'uuid', 'guid', 'uniqueidentifier',
+      // Other
+      'xml', 'money', 'currency', 'array', 'enum', 'set',
+      'geometry', 'geography', 'point', 'polygon', 'linestring'
+    ];
+    
+    // Check if type starts with a valid type name
+    for (const validType of validTypes) {
+      if (normalizedType.startsWith(validType)) {
+        return true;
+      }
+    }
+    
+    // Also accept types with parentheses like varchar(255), decimal(10,2)
+    const typeWithParens = /^[a-z_][a-z0-9_]*\([^)]+\)$/i;
+    if (typeWithParens.test(normalizedType)) {
+      return true;
+    }
+    
+    // Accept simple single-word types that look like custom types
+    const simpleType = /^[a-z_][a-z0-9_]*$/i;
+    if (simpleType.test(normalizedType) && normalizedType.length < 30) {
+      return true;
+    }
+    
+    return false;
   }
 
   private extractInlineRefs(content: string, tables: Table[]): Ref[] {
     const refs: Ref[] = [];
     
-    // For each table, find inline refs in columns
+    // Clean content - remove multi-line notes to avoid false matches
+    const cleanContent = this.removeMultilineNotes(content);
+    
     for (const table of tables) {
-      // Build search pattern - handle both "Table name" and "Table schema.name"
       const searchName = table.schema ? `(?:${table.schema}\\.)?${table.name}` : table.name;
-      const tableRegex = new RegExp(
-        `Table\\s+${searchName}\\s*(?:as\\s+\\w+)?\\s*(?:\\[[^\\]]*\\])?\\s*\\{([^}]*)\\}`,
-        'is'
+      const tableHeaderRegex = new RegExp(
+        `Table\\s+${searchName}\\s*(?:as\\s+\\w+)?\\s*(?:\\[[^\\]]*\\])?\\s*\\{`,
+        'i'
       );
-      const tableMatch = content.match(tableRegex);
+      const match = tableHeaderRegex.exec(cleanContent);
       
-      if (tableMatch) {
-        const tableContent = tableMatch[1];
-        const lines = tableContent.split('\n');
-        
-        for (const line of lines) {
-          // Match inline ref: [ref: > schema.table.column] or [ref: > table.column]
-          // Pattern: column_name type [ref: > (schema.)table.column]
-          const refMatch = line.match(/(\w+)\s+\w+.*\[.*ref:\s*([<>\-])\s*((?:\w+\.)?\w+)\.(\w+)/i);
+      if (match) {
+        const extracted = this.extractTableBody(cleanContent, match.index + match[0].length - 1);
+        if (extracted) {
+          const lines = extracted.body.split('\n');
           
-          if (refMatch) {
-            const columnName = refMatch[1];
-            const relationType = refMatch[2];
-            const targetTablePart = refMatch[3]; // Could be "schema.table" or just "table"
-            const targetColumn = refMatch[4];
+          for (const line of lines) {
+            // Match inline ref: [ref: > schema.table.column] or [ref: > table.column]
+            const refMatch = line.match(/(\w+)\s+\w+.*\[.*ref:\s*([<>\-])\s*((?:\w+\.)?\w+)\.(\w+)/i);
             
-            // Parse target table (may include schema)
-            let targetTable = targetTablePart;
-            if (targetTablePart.includes('.')) {
-              // It's schema.table format - extract just the table name
-              const parts = targetTablePart.split('.');
-              targetTable = parts[parts.length - 1];
+            if (refMatch) {
+              const columnName = refMatch[1];
+              const relationType = refMatch[2];
+              const targetTablePart = refMatch[3];
+              const targetColumn = refMatch[4];
+              
+              let targetTable = targetTablePart;
+              if (targetTablePart.includes('.')) {
+                const parts = targetTablePart.split('.');
+                targetTable = parts[parts.length - 1];
+              }
+              
+              let fromRelation: '1' | '*' = '1';
+              let toRelation: '1' | '*' = '1';
+              
+              if (relationType === '>') {
+                fromRelation = '*';
+                toRelation = '1';
+              } else if (relationType === '<') {
+                fromRelation = '1';
+                toRelation = '*';
+              }
+              
+              refs.push({
+                fromTable: table.name,
+                fromColumn: columnName,
+                toTable: targetTable,
+                toColumn: targetColumn,
+                fromRelation,
+                toRelation
+              });
             }
-            
-            let fromRelation: '1' | '*' = '1';
-            let toRelation: '1' | '*' = '1';
-            
-            if (relationType === '>') {
-              fromRelation = '*';
-              toRelation = '1';
-            } else if (relationType === '<') {
-              fromRelation = '1';
-              toRelation = '*';
-            }
-            
-            refs.push({
-              fromTable: table.name,
-              fromColumn: columnName,
-              toTable: targetTable,
-              toColumn: targetColumn,
-              fromRelation,
-              toRelation
-            });
           }
         }
       }
     }
     
     // Also parse standalone Ref statements
-    // Supports: Ref: schema.table.column > schema.table.column
-    // And: Ref: table.column > table.column
     const refRegex = /Ref\s*(?:(\w+)\s*)?:\s*((?:\w+\.)?\w+)\.(\w+)\s*([<>\-])\s*((?:\w+\.)?\w+)\.(\w+)/gi;
-    let match;
+    let refMatch;
     
-    while ((match = refRegex.exec(content)) !== null) {
-      const relationType = match[4];
+    while ((refMatch = refRegex.exec(cleanContent)) !== null) {
+      const relationType = refMatch[4];
       
-      // Parse from table (may include schema)
-      let fromTable = match[2];
+      let fromTable = refMatch[2];
       if (fromTable.includes('.')) {
         const parts = fromTable.split('.');
         fromTable = parts[parts.length - 1];
       }
       
-      // Parse to table (may include schema)
-      let toTable = match[5];
+      let toTable = refMatch[5];
       if (toTable.includes('.')) {
         const parts = toTable.split('.');
         toTable = parts[parts.length - 1];
@@ -324,11 +430,11 @@ export class DBMLParser {
       }
       
       refs.push({
-        name: match[1],
+        name: refMatch[1],
         fromTable: fromTable,
-        fromColumn: match[3],
+        fromColumn: refMatch[3],
         toTable: toTable,
-        toColumn: match[6],
+        toColumn: refMatch[6],
         fromRelation,
         toRelation
       });
@@ -340,7 +446,7 @@ export class DBMLParser {
   private extractColorsFromContent(content: string): Map<string, string> {
     const colorMap = new Map<string, string>();
     
-    const tableColorRegex = /Table\s+(\w+)\s*(?:as\s+\w+)?\s*\[([^\]]*)\]/gi;
+    const tableColorRegex = /Table\s+(?:\w+\.)?(\w+)\s*(?:as\s+\w+)?\s*\[([^\]]*)\]/gi;
     let match;
     
     while ((match = tableColorRegex.exec(content)) !== null) {
@@ -362,7 +468,7 @@ export class DBMLParser {
     
     while ((match = groupColorRegex.exec(content)) !== null) {
       const options = match[2];
-      const colorMatch = options.match(/color\s*:\s*([#\w]+)/i);
+      const colorMatch = options.match(/color\s*:\s*["']?([#\w]+)["']?/i);
       if (colorMatch) {
         colorMap.set(match[1], colorMatch[1]);
       }
@@ -374,17 +480,19 @@ export class DBMLParser {
   private extractTableGroups(content: string, colorMap: Map<string, string>): TableGroup[] {
     const groups: TableGroup[] = [];
     
-    const groupRegex = /TableGroup\s+(\w+)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/gi;
+    const cleanContent = this.removeMultilineNotes(content);
+    
+    const groupRegex = /TableGroup\s+(\w+)\s*(?:\/\/[^\n]*)?\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/gi;
     let match;
     
-    while ((match = groupRegex.exec(content)) !== null) {
+    while ((match = groupRegex.exec(cleanContent)) !== null) {
       const groupName = match[1];
       const options = match[2] || '';
       const tablesContent = match[3];
       
       let color = colorMap.get(groupName);
       if (!color) {
-        const colorMatch = options.match(/color\s*:\s*([#\w]+)/i);
+        const colorMatch = options.match(/color\s*:\s*["']?([#\w]+)["']?/i);
         if (colorMatch) {
           color = colorMatch[1];
         }
@@ -393,13 +501,21 @@ export class DBMLParser {
       const tables = tablesContent
         .split('\n')
         .map(line => line.trim())
-        .filter(line => line && !line.startsWith('//'));
+        .filter(line => {
+          if (!line) return false;
+          if (line.startsWith('//')) return false;
+          if (line.toLowerCase().startsWith('note:')) return false;
+          if (/^[#*\-]/.test(line)) return false;
+          return /^[\w.]+$/.test(line);
+        });
       
-      groups.push({
-        name: groupName,
-        tables,
-        color
-      });
+      if (tables.length > 0) {
+        groups.push({
+          name: groupName,
+          tables,
+          color
+        });
+      }
     }
     
     return groups;
@@ -414,64 +530,43 @@ export class DBMLParser {
       schemas: []
     };
 
-    // Parse tables with optional schema prefix (schema.table or just table)
-    const tableRegex = /Table\s+(?:(\w+)\.)?(\w+)(?:\s+as\s+(\w+))?\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/gi;
+    const colorMap = this.extractColorsFromContent(content);
+    
+    const tableHeaderRegex = /Table\s+(?:(\w+)\.)?(\w+)(?:\s+as\s+(\w+))?\s*(?:\[([^\]]*)\])?\s*\{/gi;
     let match;
 
-    while ((match = tableRegex.exec(content)) !== null) {
+    while ((match = tableHeaderRegex.exec(content)) !== null) {
       const schemaName = match[1] || undefined;
       const tableName = match[2];
       const alias = match[3];
       const options = match[4] || '';
-      const columnsContent = match[5];
 
-      // Track schema
       if (schemaName && !schema.schemas.includes(schemaName)) {
         schema.schemas.push(schemaName);
       }
 
-      const colorMatch = options.match(/(?:color|headercolor)\s*:\s*([#\w]+)/i);
-      const color = colorMatch ? colorMatch[1] : undefined;
+      const extracted = this.extractTableBody(content, match.index + match[0].length - 1);
+      
+      if (extracted) {
+        const colorMatch = options.match(/(?:color|headercolor)\s*:\s*([#\w]+)/i);
+        const color = colorMatch ? colorMatch[1] : colorMap.get(tableName);
 
-      const table: Table = {
-        name: tableName,
-        alias,
-        columns: [],
-        color,
-        headerColor: color,
-        schema: schemaName
-      };
+        const table: Table = {
+          name: tableName,
+          alias,
+          columns: this.parseColumns(extracted.body),
+          color,
+          headerColor: color,
+          schema: schemaName
+        };
 
-      const lines = columnsContent.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('indexes') || trimmed.startsWith('Note')) continue;
-
-        const columnMatch = trimmed.match(/^(\w+)\s+(\w+(?:\([^)]*\))?)\s*(?:\[([^\]]*)\])?/);
-        if (columnMatch) {
-          const options = columnMatch[3] || '';
-          const column: Column = {
-            name: columnMatch[1],
-            type: columnMatch[2],
-            pk: /\bpk\b/i.test(options),
-            unique: /\bunique\b/i.test(options),
-            notNull: /\bnot\s*null\b/i.test(options),
-            increment: /\bincrement\b/i.test(options)
-          };
-          table.columns.push(column);
-        }
+        schema.tables.push(table);
       }
-
-      schema.tables.push(table);
     }
 
-    // Extract refs
     schema.refs = this.extractInlineRefs(content, schema.tables);
-
-    // Parse table groups
     schema.tableGroups = this.extractTableGroups(content, this.extractGroupColorsFromContent(content));
 
-    // Parse enums
     const enumRegex = /Enum\s+(\w+)\s*\{([^}]*)\}/gi;
     while ((match = enumRegex.exec(content)) !== null) {
       const values = match[2]
@@ -487,6 +582,11 @@ export class DBMLParser {
         name: match[1],
         values
       });
+    }
+
+    const projectMatch = content.match(/Project\s+(\w+)\s*\{/i);
+    if (projectMatch) {
+      schema.projectName = projectMatch[1];
     }
 
     return schema;
