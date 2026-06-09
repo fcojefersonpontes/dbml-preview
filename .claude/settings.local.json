@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npm audit *)",
+      "Bash(mkdir -p /mnt/c/Users/jeffe/dbml-preview/syntaxes)",
+      "Bash(npm run *)"
+    ],
+    "additionalDirectories": [
+      "/mnt/c/Users/jeffe/dbml-preview"
+    ]
+  }
+}

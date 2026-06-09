@@ -3,7 +3,6 @@ import { DBMLSchema, Table, Ref, TableGroup } from './parser';
 export interface RenderOptions {
   defaultTableColor: string;
   defaultGroupColor: string;
-  backgroundColor: string;
   showRelationshipLabels: boolean;
   layout: 'left-right' | 'snowflake' | 'compact';
 }
@@ -437,14 +436,18 @@ export class ERDRenderer {
   <defs>
     <style>
       .table-header { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 13px; font-weight: 600; fill: white; }
-      .column-name { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 11px; fill: #e0e0e0; }
-      .column-type { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 10px; fill: #888; }
+      .svg-background { fill: var(--bg-main, #1e1e1e); }
+      .table-bg { fill: var(--erd-table-bg, #2a2a2a); }
+      .column-name { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 11px; fill: var(--erd-text-primary, #e0e0e0); }
+      .column-type { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 10px; fill: var(--erd-text-muted, #888); }
       .pk-icon { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9px; fill: #ffd700; font-weight: bold; }
       .fk-icon { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9px; fill: #64b5f6; font-weight: bold; }
-      .group-label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; fill: #aaa; font-weight: 500; }
+      .group-label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; fill: var(--erd-text-muted, #aaa); font-weight: 500; }
       .relation-line { stroke-width: 2; fill: none; }
       .cardinality-label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; font-weight: bold; }
-      .cardinality-bg { fill: #1e1e1e; }
+      .cardinality-bg { fill: var(--erd-card-bg, #2a2a2a); }
+      .col-row-alt { fill: var(--erd-row-alt, rgba(255,255,255,0.02)); }
+      .col-sep { stroke: var(--erd-separator, rgba(255,255,255,0.05)); stroke-width: 1; }
       .draggable { cursor: move; }
       .dragging { opacity: 0.8; }
     </style>
@@ -483,7 +486,7 @@ export class ERDRenderer {
     </filter>
   </defs>
   
-  <rect width="100%" height="100%" fill="${this.options.backgroundColor}"/>
+  <rect class="svg-background" width="100%" height="100%"/>
   
   <!-- Relationships layer -->
   <g class="relationships-layer">
@@ -586,7 +589,7 @@ export class ERDRenderer {
     let svg = `
     <g class="table draggable" data-table="${table.name}" transform="translate(0,0)">
       <rect class="table-bg" x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}"
-            fill="#2a2a2a" stroke="${color}" stroke-width="2" rx="8" ry="8" filter="url(#shadow)"/>
+            fill="var(--erd-table-bg)" stroke="${color}" stroke-width="2" rx="8" ry="8" filter="url(#shadow)"/>
       
       <rect class="table-header-bg" x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${this.headerHeight}"
             fill="${color}" rx="8" ry="8"/>
@@ -608,7 +611,7 @@ export class ERDRenderer {
       
       if (i % 2 === 1) {
         svg += `
-      <rect x="${pos.x + 2}" y="${y - 2}" width="${pos.width - 4}" height="${this.rowHeight}" fill="rgba(255,255,255,0.02)" rx="2"/>`;
+      <rect class="col-row-alt" x="${pos.x + 2}" y="${y - 2}" width="${pos.width - 4}" height="${this.rowHeight}" rx="2"/>`;
       }
       
       svg += `
@@ -637,8 +640,7 @@ export class ERDRenderer {
       
       if (!isLast) {
         svg += `
-      <line x1="${pos.x + 8}" y1="${y + this.rowHeight - 1}" x2="${pos.x + pos.width - 8}" y2="${y + this.rowHeight - 1}"
-            stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+      <line class="col-sep" x1="${pos.x + 8}" y1="${y + this.rowHeight - 1}" x2="${pos.x + pos.width - 8}" y2="${y + this.rowHeight - 1}"/>`;
       }
       
       y += this.rowHeight;
@@ -726,15 +728,15 @@ export class ERDRenderer {
       <path d="${path}" stroke="transparent" stroke-width="20" fill="none" class="relation-hover-target"/>
       
       <!-- From cardinality label with background -->
-      <rect x="${fromLabelX - 12}" y="${fromY + labelOffsetY - 12}" width="24" height="20" rx="4" 
-            class="cardinality-bg" fill="#2a2a2a" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
-      <text x="${fromLabelX}" y="${fromY + labelOffsetY + 2}" text-anchor="middle" 
+      <rect x="${fromLabelX - 12}" y="${fromY + labelOffsetY - 12}" width="24" height="20" rx="4"
+            class="cardinality-bg" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
+      <text x="${fromLabelX}" y="${fromY + labelOffsetY + 2}" text-anchor="middle"
             class="cardinality-label" fill="#64b5f6">${fromCardLabel}</text>
-      
+
       <!-- To cardinality label with background -->
-      <rect x="${toLabelX - 12}" y="${toY + labelOffsetY - 12}" width="24" height="20" rx="4" 
-            class="cardinality-bg" fill="#2a2a2a" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
-      <text x="${toLabelX}" y="${toY + labelOffsetY + 2}" text-anchor="middle" 
+      <rect x="${toLabelX - 12}" y="${toY + labelOffsetY - 12}" width="24" height="20" rx="4"
+            class="cardinality-bg" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
+      <text x="${toLabelX}" y="${toY + labelOffsetY + 2}" text-anchor="middle"
             class="cardinality-label" fill="#64b5f6">${toCardLabel}</text>
     </g>`;
   }
