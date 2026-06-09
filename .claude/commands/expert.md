@@ -10,7 +10,7 @@ You are now operating as an expert developer on the **DBML Preview** VS Code ext
 |-------|-------|
 | Nome | `dbml-preview` |
 | Publisher | `JefersonPontes` |
-| Versão | 1.2.2 |
+| Versão | 1.3.0 |
 | Engine mínima | VS Code 1.85.0 |
 | Licença | MIT |
 | Repo | github.com/fcojefersonpontes/dbml-preview |
@@ -57,7 +57,7 @@ VS Code Webview
 - **`dbml-previewer.preview`** → chama `ERDPreviewPanel.createOrShow()`
 - **`dbml-previewer.exportSvg`** → instancia `DBMLParser` + `ERDRenderer`, abre save dialog, grava SVG  
   - ⚠️ **Código morto:** ainda lê `config.get('backgroundColor', '#1e1e1e')` no objeto `options`, mas `RenderOptions` não tem mais esse campo. O TypeScript não reclama porque a variável não é anotada como `RenderOptions` antes de ser passada. O campo é simplesmente ignorado — não causa bug funcional, mas é lixo a remover.
-- **HoverProvider** → ao passar o mouse sobre nome de tabela, exibe tabela markdown com colunas
+- **HoverProvider** → ao passar o mouse sobre nome de tabela no editor, exibe tooltip markdown com: nota da tabela (itálico), tabela `Column | Type | Note` com badges *(PK)*, *(unique)*, *(not null)*, e nota inline da coluna `[note: '...']`
 - **CodeLensProvider** → exibe botão `$(preview) Preview Diagram` no topo de arquivos .dbml
 
 **Ativação:** automática via `languages` em `package.json` (campo `activationEvents` removido na v1.1.0)
@@ -150,7 +150,7 @@ TableLayoutInfo { name, connections, inDegree, outDegree, level, group? }
 
 ---
 
-### `src/previewPanel.ts` (965 linhas)
+### `src/previewPanel.ts` (~1080 linhas)
 **Responsabilidade:** Painel webview interativo — wrapper de estado + HTML + JS interativo.
 
 **Propriedades da classe:**
@@ -253,6 +253,7 @@ Tudo automático via CSS — sem recarregar HTML.
 - `updateGroupBackgrounds()` — atualiza rect do grupo ao arrastar tabelas
 - `updateSvgSize()` — expande SVG se tabela sair dos limites
 - `initPositions()` — aplica `savedPositions` ao carregar via `transform="translate(dx,dy)"`
+- **Focus Mode** (v1.3.0): `activateFocusMode(table, depth)` → oculta tabelas não relacionadas via `display:none`; `exitFocusMode()` → restaura; `getNeighbors(table, depth)` BFS na adjacência de refs; banner com depth control; atalho `F`, context menu, ícone 🎯 na sidebar
 
 **Atalhos de teclado:**
 | Atalho | Ação |
@@ -261,7 +262,8 @@ Tudo automático via CSS — sem recarregar HTML.
 | Ctrl+= ou Ctrl++ | zoom in |
 | Ctrl+- | zoom out |
 | Ctrl+0 | fit to screen |
-| Escape | deselecionar tudo |
+| Escape | sair do Focus Mode (se ativo), senão deselecionar tudo |
+| F | ativar Focus Mode na tabela selecionada |
 | Shift+drag | arrastar grupo inteiro |
 | clique em tabela | selecionar + highlight rels |
 | duplo clique em tabela | navegar no editor |
@@ -308,7 +310,7 @@ dbml-preview/
 │   ├── extension.ts          # entry point (~134 linhas)
 │   ├── parser.ts             # DBML parser (~595 linhas)
 │   ├── renderer.ts           # SVG renderer (~744 linhas)
-│   └── previewPanel.ts       # webview interativo (~965 linhas)
+│   └── previewPanel.ts       # webview interativo (~1080 linhas)
 ├── out/                      # JS compilado (gerado pelo tsc)
 ├── examples/
 │   ├── ecommerce.dbml        # schema complexo para testes
@@ -339,7 +341,9 @@ dbml-preview/
 
 1. ~~**`extension.ts` — código morto:**~~ **corrigido na v1.2.2** — `config.get('backgroundColor', '#1e1e1e')` removido do comando `exportSvg`; `RenderOptions` não tem esse campo desde a v1.2.1.
 
-2. **`layout: 'compact'` hardcoded** em `previewPanel.ts` e `extension.ts` — os outros 2 layouts existem em `renderer.ts` mas nunca são expostos via UI ou config.
+2. ~~**HoverProvider mostrava apenas `Column | Type`:**~~ **corrigido na v1.2.3** — tooltip agora exibe nota da tabela, badges de modificadores (PK, unique, not null) e notas inline de colunas `[note: '...']`.
+
+3. **`layout: 'compact'` hardcoded** em `previewPanel.ts` e `extension.ts` — os outros 2 layouts existem em `renderer.ts` mas nunca são expostos via UI ou config.
 
 ---
 
@@ -353,6 +357,8 @@ dbml-preview/
 6. ~~**Configuração de tema**~~ — **implementado na v1.2.0** (CSS variables `--vscode-*` + `--erd-*`, listener `onDidChangeActiveColorTheme`)
 7. ~~**Bug: fundo não respeitava tema**~~ — **corrigido na v1.2.1** (`<rect class="svg-background">` usa `var(--bg-main)`; `backgroundColor` removido de `RenderOptions` e do `package.json`; ver `docs/fix-theme-background.md`)
 8. ~~**Limpeza:** remover `backgroundColor` morto de `extension.ts:50`~~ — **feito na v1.2.2**
+9. ~~**Hover sem documentação de colunas:**~~ — **corrigido na v1.2.3**
+10. ~~**Focus Mode — visualização filtrada por tabela:**~~ — **implementado na v1.3.0** — ativar via 🎯 sidebar / clique direito / tecla `F`; depth control para star/snowflake; zoom/drag inalterados — tooltip exibe nota da tabela + tabela `Column | Type | Note` completa com modificadores e notas de coluna
 
 ---
 
@@ -376,7 +382,7 @@ npm run compile
 npm run package
 # Ou diretamente:
 ./node_modules/.bin/vsce package
-# Resultado: dbml-preview-1.2.2.vsix
+# Resultado: dbml-preview-1.3.0.vsix
 ```
 
 **Testar a extensão:**

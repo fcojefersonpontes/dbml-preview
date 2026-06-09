@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(sed -i 's/| Versão | 1.2.3 |/| Versão | 1.3.0 |/' /mnt/c/Users/jeffe/dbml-preview/.claude/commands/expert.md)",
+      "Bash(sed -i 's/previewPanel.ts       # webview interativo \\(~965 linhas\\)/previewPanel.ts       # webview interativo \\(~1080 linhas\\)/' /mnt/c/Users/jeffe/dbml-preview/.claude/commands/expert.md)",
+      "Bash(sed -i 's/### `src\\\\/previewPanel.ts` \\(965 linhas\\)/### `src\\\\/previewPanel.ts` \\(~1080 linhas\\)/' /mnt/c/Users/jeffe/dbml-preview/.claude/commands/expert.md)",
+      "Bash(sed -i 's/- `initPositions\\(\\)` — aplica `savedPositions` ao carregar via `transform=\"translate\\(dx,dy\\)\"`/- `initPositions\\(\\)` — aplica `savedPositions` ao carregar via `transform=\"translate\\(dx,dy\\)\"`\\\\n- **Focus Mode** \\(v1.3.0\\): `activateFocusMode\\(table, depth\\)` → oculta tabelas não relacionadas via `display:none`; `exitFocusMode\\(\\)` → restaura; `getNeighbors\\(table, depth\\)` BFS na adjacência de refs; banner com depth control; atalho `F`, context menu, ícone 🎯 na sidebar/' /mnt/c/Users/jeffe/dbml-preview/.claude/commands/expert.md)",
+      "Bash(sed -i 's/| Escape | deselecionar tudo |/| Escape | sair do Focus Mode \\(se ativo\\), senão deselecionar tudo |\\\\n| F | ativar Focus Mode na tabela selecionada |/' /mnt/c/Users/jeffe/dbml-preview/.claude/commands/expert.md)",
+      "Bash(sed -i 's/\\\\*\\\\*Status:\\\\*\\\\* Planejado/\\\\*\\\\*Status:\\\\*\\\\* Implementado ✅/' /mnt/c/Users/jeffe/dbml-preview/docs/feature-focus-mode.md)",
+      "Bash(sed -i 's/\\\\*\\\\*Versão alvo:\\\\*\\\\*/\\\\*\\\\*Versão:\\\\*\\\\*/' /mnt/c/Users/jeffe/dbml-preview/docs/feature-focus-mode.md)"
+    ],
+    "additionalDirectories": [
+      "/mnt/c/Users/jeffe/dbml-preview/.claude/commands"
+    ]
+  }
+}

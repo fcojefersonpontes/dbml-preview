@@ -203,6 +203,7 @@ export class ERDPreviewPanel {
             <span class="table-name">${t.name}</span>
             <span class="table-meta">${t.columns.length} cols · ${relCount} rels</span>
           </div>
+          <button class="focus-btn" data-table="${t.name}" title="Focus on this table">🎯</button>
         </div>`;
       }
       
@@ -226,6 +227,7 @@ export class ERDPreviewPanel {
     }));
     const groupsData = JSON.stringify(normalizedGroups);
     const savedPositionsData = JSON.stringify(this._savedPositions || {});
+    const schemaRefsData = JSON.stringify(schema.refs.map(r => ({ fromTable: r.fromTable, toTable: r.toTable })));
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -330,6 +332,22 @@ export class ERDPreviewPanel {
     .save-status{font-size:10px;margin-left:4px}
     .save-status.saved{color:#4caf50}
     .save-status.unsaved{color:#ff9800}
+    .focus-banner{display:none;align-items:center;gap:10px;padding:6px 14px;background:var(--vscode-badge-background,#0e639c);color:var(--vscode-badge-foreground,#fff);font-size:12px;flex-shrink:0;border-bottom:1px solid var(--border)}
+    .focus-banner.visible{display:flex}
+    .focus-banner strong{font-weight:700}
+    .focus-count{opacity:.85;font-size:11px}
+    .focus-depth-ctrl{display:flex;align-items:center;gap:4px;margin-left:6px}
+    .focus-depth-ctrl button{background:rgba(255,255,255,.2);color:inherit;border:none;padding:2px 7px;border-radius:3px;cursor:pointer;font-size:13px;line-height:1}
+    .focus-depth-ctrl button:hover{background:rgba(255,255,255,.35)}
+    .focus-depth-val{min-width:18px;text-align:center;font-weight:600}
+    .focus-exit{margin-left:auto;background:rgba(255,255,255,.15);color:inherit;border:none;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:11px;font-weight:600}
+    .focus-exit:hover{background:rgba(255,255,255,.3)}
+    .table-item{position:relative}
+    .focus-btn{display:none;position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:13px;padding:2px 4px;opacity:.7;border-radius:3px}
+    .focus-btn:hover{opacity:1;background:var(--hover)}
+    .table-item:hover .focus-btn{display:block}
+    .table-item.focus-dimmed{opacity:.3}
+    .table-item.focus-dimmed .focus-btn{display:none}
   </style>
 </head>
 <body>
@@ -372,6 +390,15 @@ export class ERDPreviewPanel {
       </div>
     </div>
     
+    <div class="focus-banner" id="focusBanner">
+      <span>🎯 Focus: <strong id="focusTableName"></strong></span>
+      <span class="focus-count" id="focusCount"></span>
+      <div class="focus-depth-ctrl">
+        Depth: <button id="btnDepthDec">−</button><span class="focus-depth-val" id="focusDepthVal">1</span><button id="btnDepthInc">+</button>
+      </div>
+      <button class="focus-exit" id="btnExitFocus">✕ Exit Focus</button>
+    </div>
+
     <div class="canvas-container" id="canvasContainer">
       <div class="canvas-scroll" id="canvasScroll">
         <div class="canvas" id="canvas">${svg}</div>
@@ -399,7 +426,156 @@ export class ERDPreviewPanel {
       
       const groups = ${groupsData};
       const savedPositions = ${savedPositionsData};
-      
+      const schemaRefs = ${schemaRefsData};
+
+      // --- Focus Mode state ---
+      let focusState = null; // null = normal mode; { focalTable, depth } when active
+
+      function buildAdjacency() {
+        const adj = new Map();
+        schemaRefs.forEach(r => {
+          if (!adj.has(r.fromTable)) adj.set(r.fromTable, new Set());
+          if (!adj.has(r.toTable))   adj.set(r.toTable, new Set());
+          adj.get(r.fromTable).add(r.toTable);
+          adj.get(r.toTable).add(r.fromTable);
+        });
+        return adj;
+      }
+
+      function getNeighbors(startTable, depth) {
+        const adj = buildAdjacency();
+        const visible = new Set([startTable]);
+        let frontier = new Set([startTable]);
+        for (let d = 0; d < depth; d++) {
+          const next = new Set();
+          frontier.forEach(t => { (adj.get(t) || new Set()).forEach(n => { if (!visible.has(n)) { visible.add(n); next.add(n); } }); });
+          frontier = next;
+          if (!frontier.size) break;
+        }
+        return visible;
+      }
+
+      function fitVisibleTables(visibleTables) {
+        let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0, found = false;
+        visibleTables.forEach(name => {
+          const p = tablePositions[name];
+          if (p) { found = true; minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x + p.width); maxY = Math.max(maxY, p.y + p.height); }
+        });
+        if (!found) return;
+        const pad = 60;
+        const w = maxX - minX + pad * 2, h = maxY - minY + pad * 2;
+        const rect = container.getBoundingClientRect();
+        zoom = Math.min((rect.width - 20) / w, (rect.height - 20) / h, 2);
+        updateZoom();
+        canvasScroll.scrollLeft = (minX - pad) * zoom;
+        canvasScroll.scrollTop  = (minY - pad) * zoom;
+      }
+
+      function applyFocusFilter(visibleTables) {
+        canvas.querySelectorAll('.table').forEach(el => {
+          el.style.display = visibleTables.has(el.dataset.table) ? '' : 'none';
+        });
+        canvas.querySelectorAll('.relationship').forEach(el => {
+          const from = el.dataset.fromTable, to = el.dataset.toTable;
+          el.style.display = (visibleTables.has(from) && visibleTables.has(to)) ? '' : 'none';
+        });
+        document.querySelectorAll('.table-item').forEach(el => {
+          if (visibleTables.has(el.dataset.table)) el.classList.remove('focus-dimmed');
+          else el.classList.add('focus-dimmed');
+        });
+      }
+
+      function clearFocusFilter() {
+        canvas.querySelectorAll('.table').forEach(el => { el.style.display = ''; });
+        canvas.querySelectorAll('.relationship').forEach(el => { el.style.display = ''; });
+        document.querySelectorAll('.table-item').forEach(el => el.classList.remove('focus-dimmed'));
+      }
+
+      function updateFocusBanner() {
+        const banner = document.getElementById('focusBanner');
+        if (!focusState) { banner.classList.remove('visible'); return; }
+        banner.classList.add('visible');
+        document.getElementById('focusTableName').textContent = focusState.focalTable;
+        document.getElementById('focusDepthVal').textContent = focusState.depth;
+        const vis = getNeighbors(focusState.focalTable, focusState.depth);
+        document.getElementById('focusCount').textContent = vis.size + ' table' + (vis.size !== 1 ? 's' : '') + ' visible';
+      }
+
+      function activateFocusMode(tableName, depth) {
+        focusState = { focalTable: tableName, depth: depth || 1 };
+        const visible = getNeighbors(tableName, focusState.depth);
+        applyFocusFilter(visible);
+        updateFocusBanner();
+        setTimeout(() => fitVisibleTables(visible), 30);
+      }
+
+      function exitFocusMode() {
+        focusState = null;
+        clearFocusFilter();
+        updateFocusBanner();
+      }
+
+      // Focus banner controls
+      document.getElementById('btnExitFocus').addEventListener('click', exitFocusMode);
+      document.getElementById('btnDepthInc').addEventListener('click', () => {
+        if (!focusState) return;
+        focusState.depth = Math.min(focusState.depth + 1, 10);
+        const visible = getNeighbors(focusState.focalTable, focusState.depth);
+        applyFocusFilter(visible);
+        updateFocusBanner();
+        setTimeout(() => fitVisibleTables(visible), 30);
+      });
+      document.getElementById('btnDepthDec').addEventListener('click', () => {
+        if (!focusState) return;
+        focusState.depth = Math.max(focusState.depth - 1, 1);
+        const visible = getNeighbors(focusState.focalTable, focusState.depth);
+        applyFocusFilter(visible);
+        updateFocusBanner();
+        setTimeout(() => fitVisibleTables(visible), 30);
+      });
+
+      // Sidebar focus buttons
+      document.querySelectorAll('.focus-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          activateFocusMode(this.dataset.table, focusState ? focusState.depth : 1);
+        });
+      });
+
+      // Context menu on right-click in canvas
+      const ctxMenu = document.createElement('div');
+      ctxMenu.id = 'ctxMenu';
+      ctxMenu.style.cssText = 'position:fixed;z-index:9999;background:var(--tooltip-bg);border:1px solid var(--border);border-radius:4px;padding:4px 0;display:none;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,.4)';
+      document.body.appendChild(ctxMenu);
+
+      function hideCtxMenu() { ctxMenu.style.display = 'none'; }
+
+      canvas.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        hideCtxMenu();
+        const tableEl = e.target.closest('.table');
+        if (!tableEl) return;
+        const name = tableEl.dataset.table;
+        ctxMenu.innerHTML = '<div style="padding:6px 14px;font-size:12px;color:var(--fg-muted);border-bottom:1px solid var(--border);margin-bottom:4px">' + name + '</div>' +
+          '<div class="ctx-item" style="padding:6px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" data-action="focus" data-table="' + name + '">🎯 Focus on this table</div>' +
+          '<div class="ctx-item" style="padding:6px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px" data-action="goto" data-table="' + name + '">→ Go to definition</div>';
+        ctxMenu.style.display = 'block';
+        ctxMenu.style.left = e.clientX + 'px';
+        ctxMenu.style.top  = e.clientY + 'px';
+        ctxMenu.querySelectorAll('.ctx-item').forEach(item => {
+          item.addEventListener('mouseover', function() { this.style.background = 'var(--hover)'; });
+          item.addEventListener('mouseout',  function() { this.style.background = ''; });
+          item.addEventListener('click', function() {
+            hideCtxMenu();
+            if (this.dataset.action === 'focus') activateFocusMode(this.dataset.table, focusState ? focusState.depth : 1);
+            if (this.dataset.action === 'goto')  vscode.postMessage({ command: 'goToTable', tableName: this.dataset.table });
+          });
+        });
+      });
+      document.addEventListener('click', hideCtxMenu);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCtxMenu(); });
+      // --- End Focus Mode state ---
+
       let zoom = 1;
       let isPanning = false;
       let isDraggingTable = false;
@@ -934,8 +1110,14 @@ export class ERDPreviewPanel {
         else if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); zoomOut(); }
         else if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); fitToScreen(); }
         else if (e.key === 'Escape') {
+          if (focusState) { exitFocusMode(); return; }
           canvas.querySelectorAll('.table.selected, .relationship.highlighted').forEach(el => el.classList.remove('selected', 'highlighted'));
           document.querySelectorAll('.table-item.highlighted').forEach(t => t.classList.remove('highlighted'));
+        } else if (e.key === 'f' || e.key === 'F') {
+          const sel = canvas.querySelector('.table.selected');
+          if (sel && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            activateFocusMode(sel.dataset.table, focusState ? focusState.depth : 1);
+          }
         }
       });
       

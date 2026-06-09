@@ -87,22 +87,50 @@ export function activate(context: vscode.ExtensionContext) {
       const tableMatch = text.match(tableRegex);
       
       if (tableMatch) {
-        const columns = tableMatch[1]
-          .split('\n')
-          .map(l => l.trim())
-          .filter(l => l && !l.startsWith('//') && !l.startsWith('indexes'));
-        
+        const bodyText = tableMatch[1];
+        const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('//'));
+
+        // Extract table-level Note
+        let tableNote: string | undefined;
+        const tableNoteLine = lines.find(l => /^Note\s*:/i.test(l));
+        if (tableNoteLine) {
+          const m = tableNoteLine.match(/^Note\s*:\s*['"]([^'"]*)['"]/i);
+          if (m) { tableNote = m[1]; }
+        }
+
         const markdown = new vscode.MarkdownString();
         markdown.appendMarkdown(`**Table: ${word}**\n\n`);
-        markdown.appendMarkdown('| Column | Type |\n|--------|------|\n');
-        
-        for (const col of columns) {
-          const parts = col.match(/^(\w+)\s+(\w+(?:\([^)]*\))?)/);
-          if (parts) {
-            markdown.appendMarkdown(`| ${parts[1]} | ${parts[2]} |\n`);
-          }
+        if (tableNote) {
+          markdown.appendMarkdown(`*${tableNote}*\n\n`);
         }
-        
+        markdown.appendMarkdown('| Column | Type | Note |\n|--------|------|------|\n');
+
+        for (const col of lines) {
+          // Skip index blocks and Note lines
+          if (/^(indexes|Note)\s*[:{]/i.test(col) || /^Note\s*:/i.test(col)) { continue; }
+
+          const parts = col.match(/^(\w+)\s+(\w+(?:\([^)]*\))?)(.*)?$/);
+          if (!parts) { continue; }
+
+          const colName = parts[1];
+          const colType = parts[2];
+          const attrs = parts[3] || '';
+
+          // Collect flags
+          const flags: string[] = [];
+          if (/\bpk\b/i.test(attrs)) { flags.push('PK'); }
+          if (/\bunique\b/i.test(attrs)) { flags.push('unique'); }
+          if (/\bnot null\b/i.test(attrs)) { flags.push('not null'); }
+
+          // Extract inline note from [...note: '...']
+          let colNote = '';
+          const noteMatch = attrs.match(/\bnote\s*:\s*['"]([^'"]*)['"]/i);
+          if (noteMatch) { colNote = noteMatch[1]; }
+
+          const typeDisplay = flags.length > 0 ? `${colType} *(${flags.join(', ')})*` : colType;
+          markdown.appendMarkdown(`| ${colName} | ${typeDisplay} | ${colNote} |\n`);
+        }
+
         return new vscode.Hover(markdown, range);
       }
 
