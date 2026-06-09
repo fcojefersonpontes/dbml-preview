@@ -47,7 +47,6 @@ export function activate(context: vscode.ExtensionContext) {
       const options = {
         defaultTableColor: config.get('defaultTableColor', '#3498db'),
         defaultGroupColor: config.get('defaultGroupColor', '#95a5a6'),
-        backgroundColor: config.get('backgroundColor', '#1e1e1e'),
         showRelationshipLabels: config.get('showRelationshipLabels', true),
         layout: 'compact' as 'left-right' | 'snowflake' | 'compact'
       };

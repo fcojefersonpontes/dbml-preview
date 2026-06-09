@@ -1,0 +1,201 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "DBML",
+  "scopeName": "source.dbml",
+  "fileTypes": ["dbml"],
+  "patterns": [
+    { "include": "#block-comment" },
+    { "include": "#line-comment" },
+    { "include": "#triple-string-single" },
+    { "include": "#triple-string-double" },
+    { "include": "#string-backtick" },
+    { "include": "#string-single" },
+    { "include": "#string-double" },
+    { "include": "#block-declarations" },
+    { "include": "#column-settings" },
+    { "include": "#block-level-keywords" },
+    { "include": "#data-types" },
+    { "include": "#constants" },
+    { "include": "#hex-colors" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "block-comment": {
+      "name": "comment.block.dbml",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.comment.end.dbml" } }
+    },
+    "line-comment": {
+      "name": "comment.line.double-slash.dbml",
+      "match": "//.*$"
+    },
+    "triple-string-single": {
+      "name": "string.quoted.triple.dbml",
+      "begin": "'''",
+      "end": "'''",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.dbml" } }
+    },
+    "triple-string-double": {
+      "name": "string.quoted.triple.dbml",
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.dbml" } }
+    },
+    "string-backtick": {
+      "name": "string.quoted.other.dbml",
+      "begin": "`",
+      "end": "`",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.dbml" } }
+    },
+    "string-single": {
+      "name": "string.quoted.single.dbml",
+      "begin": "'",
+      "end": "'",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.dbml" } },
+      "patterns": [{ "name": "constant.character.escape.dbml", "match": "\\\\." }]
+    },
+    "string-double": {
+      "name": "string.quoted.double.dbml",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.dbml" } },
+      "patterns": [{ "name": "constant.character.escape.dbml", "match": "\\\\." }]
+    },
+    "block-declarations": {
+      "patterns": [
+        {
+          "comment": "Table with optional schema prefix and optional alias",
+          "match": "\\b(Table)\\s+([\\w]+(?:\\.[\\w]+)*)(?:\\s+as\\s+(\\w+))?",
+          "captures": {
+            "1": { "name": "keyword.declaration.table.dbml" },
+            "2": { "name": "entity.name.type.dbml" },
+            "3": { "name": "variable.other.alias.dbml" }
+          }
+        },
+        {
+          "comment": "Enum declaration",
+          "match": "\\b(Enum)\\s+([\\w.]+)",
+          "captures": {
+            "1": { "name": "keyword.declaration.enum.dbml" },
+            "2": { "name": "entity.name.type.dbml" }
+          }
+        },
+        {
+          "comment": "TableGroup declaration",
+          "match": "\\b(TableGroup)\\s+(\\w+)",
+          "captures": {
+            "1": { "name": "keyword.declaration.tablegroup.dbml" },
+            "2": { "name": "entity.name.type.dbml" }
+          }
+        },
+        {
+          "comment": "Project declaration",
+          "match": "\\b(Project)\\s+(\\w+)",
+          "captures": {
+            "1": { "name": "keyword.declaration.project.dbml" },
+            "2": { "name": "entity.name.type.dbml" }
+          }
+        },
+        {
+          "comment": "Named Ref",
+          "match": "\\b(Ref)(?:\\s+(\\w+))?\\s*(?=:|\\{)",
+          "captures": {
+            "1": { "name": "keyword.declaration.ref.dbml" },
+            "2": { "name": "entity.name.function.dbml" }
+          }
+        }
+      ]
+    },
+    "block-level-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.other.block.dbml",
+          "match": "\\b(Note|database_type|indexes)\\s*:"
+        },
+        {
+          "name": "keyword.operator.relationship.dbml",
+          "match": "(<>|[<>-])(?=\\s*[\\w\"'`])"
+        }
+      ]
+    },
+    "column-settings": {
+      "name": "meta.column-settings.dbml",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.section.brackets.begin.dbml" } },
+      "endCaptures": { "0": { "name": "punctuation.section.brackets.end.dbml" } },
+      "patterns": [
+        { "include": "#block-comment" },
+        { "include": "#line-comment" },
+        { "include": "#string-backtick" },
+        { "include": "#string-single" },
+        { "include": "#string-double" },
+        {
+          "name": "keyword.other.attribute.dbml",
+          "match": "\\b(pk|primary\\s+key|unique|not\\s+null|null|increment|default|note|ref|headercolor|color)\\b"
+        },
+        {
+          "name": "keyword.other.action.dbml",
+          "match": "\\b(on\\s+delete|on\\s+update|cascade|restrict|set\\s+null|set\\s+default|no\\s+action)\\b"
+        },
+        {
+          "name": "keyword.operator.relationship.dbml",
+          "match": "<>|[<>-]"
+        },
+        { "include": "#hex-colors" },
+        { "include": "#constants" }
+      ]
+    },
+    "data-types": {
+      "name": "storage.type.dbml",
+      "match": "\\b(int|integer|bigint|smallint|tinyint|mediumint|varchar|char|text|tinytext|mediumtext|longtext|boolean|bool|date|datetime|timestamp|timestamptz|time|timetz|float|double|decimal|numeric|real|uuid|json|jsonb|serial|bigserial|bytea|blob|binary|varbinary|money|bit|xml|inet|cidr|macaddr|interval|point|line|lseg|box|path|polygon|circle|array)(?:\\s*\\([^)]*\\))?\\b"
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.boolean.dbml",
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.dbml",
+          "match": "\\bnull\\b"
+        },
+        {
+          "name": "constant.numeric.integer.dbml",
+          "match": "\\b-?[0-9]+(?:\\.[0-9]+)?\\b"
+        }
+      ]
+    },
+    "hex-colors": {
+      "name": "constant.other.color.dbml",
+      "match": "#[0-9a-fA-F]{3,8}\\b"
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.block.dbml",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.accessor.dot.dbml",
+          "match": "(?<=[\\w])\\."
+        },
+        {
+          "name": "punctuation.separator.colon.dbml",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.comma.dbml",
+          "match": ","
+        }
+      ]
+    }
+  }
+}

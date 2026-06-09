@@ -2,7 +2,7 @@
   "name": "dbml-preview",
   "displayName": "DBML Preview",
   "description": "Preview Entity-Relationship Diagrams from DBML files with interactive visualization",
-  "version": "1.0.1",
+  "version": "1.2.2",
   "publisher": "JefersonPontes",
   "engines": {
     "vscode": "^1.85.0"
@@ -21,10 +21,7 @@
     "schema",
     "preview"
   ],
-  "activationEvents": [
-    "onLanguage:dbml"
-  ],
-  "main": "./out/extension.js",
+"main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
@@ -65,7 +62,15 @@
         "aliases": [
           "DBML",
           "Database Markup Language"
-        ]
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dbml",
+        "scopeName": "source.dbml",
+        "path": "./syntaxes/dbml.tmLanguage.json"
       }
     ],
     "configuration": {
@@ -80,11 +85,6 @@
           "type": "string",
           "default": "#95a5a6",
           "description": "Default color for groups without a specified color"
-        },
-        "dbmlPreviewer.backgroundColor": {
-          "type": "string",
-          "default": "#1e1e1e",
-          "description": "Background color of the diagram"
         },
         "dbmlPreviewer.showRelationshipLabels": {
           "type": "boolean",
