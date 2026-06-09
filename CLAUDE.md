@@ -1,6 +1,6 @@
 # DBML Preview — Claude Context
 
-VS Code extension that renders interactive ERD diagrams from `.dbml` files. Created by JefersonPontes. Current version: **1.2.3**.
+VS Code extension that renders interactive ERD diagrams from `.dbml` files. Created by JefersonPontes. Current version: **1.3.0**.
 
 ## Key Files
 
@@ -9,7 +9,7 @@ VS Code extension that renders interactive ERD diagrams from `.dbml` files. Crea
 | `src/extension.ts` | Entry point — registers commands, hover provider, code lens |
 | `src/parser.ts` | Custom regex DBML parser → `DBMLSchema` |
 | `src/renderer.ts` | SVG renderer — used by both preview panel and `exportSvg` command |
-| `src/previewPanel.ts` | Interactive webview panel — drag, zoom, layout save |
+| `src/previewPanel.ts` | Interactive webview panel — drag, zoom, layout save, **Focus Mode** |
 
 ## Architecture Note
 
@@ -36,6 +36,16 @@ No bundler — plain `tsc`. Zero production dependencies.
 
 Run extension: press F5 in VS Code → open `examples/ecommerce-example.dbml` → click preview button.
 No automated tests implemented yet.
+
+## Focus Mode (`src/previewPanel.ts`)
+
+Isolates a table and its related tables — ideal for Data Warehouse schemas with multiple star schemas.
+
+- **Activate:** right-click a table → "Focus on this table"; or click 🎯 in the sidebar; or select a table and press `F`
+- **Depth control:** `−` / `+` in the banner to expand/collapse the neighborhood (depth 1 = direct refs only, depth 2 = snowflake)
+- **Exit:** `✕` button, press `Escape`, or click empty canvas area
+- Hides unrelated tables via `display:none` — zoom/drag/pan are unaffected
+- Auto-fits visible tables to screen on activation
 
 ## Custom Slash Command
 

@@ -14,6 +14,7 @@ A VS Code extension to preview Entity-Relationship Diagrams from `.dbml` files w
 - **Syntax Highlighting** — full `.dbml` grammar with TextMate support
 - **Navigation** — click a table or column to jump to its definition in the source file
 - **Hover Documentation** — hover over a table in the editor for a quick column reference
+- **Focus Mode** — isolate a table and its related tables; ideal for large Data Warehouse schemas with multiple star schemas
 
 ## Usage
 
@@ -23,6 +24,22 @@ A VS Code extension to preview Entity-Relationship Diagrams from `.dbml` files w
 4. Press **Ctrl+S** to save the layout
 5. Use **Export SVG** in the toolbar to save the diagram as a file
 
+## Focus Mode
+
+Focus Mode lets you isolate a single table and its related tables, hiding everything else. Perfect for exploring a star schema inside a large Data Warehouse model.
+
+**Activate:**
+- Right-click a table on the canvas → **Focus on this table**
+- Hover a table in the sidebar → click the 🎯 icon
+- Select a table and press **F**
+
+**While active:**
+- A banner at the top shows the focal table name and how many tables are visible
+- Use **−** / **+** in the banner to adjust depth (depth 1 = direct neighbors / star schema; depth 2 = snowflake)
+- Zoom, drag, and pan work normally on the visible tables
+
+**Exit:** click **✕ Exit Focus** in the banner, press **Escape**, or click empty canvas space.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -31,7 +48,8 @@ A VS Code extension to preview Entity-Relationship Diagrams from `.dbml` files w
 | Ctrl+0 | Fit diagram to screen |
 | Ctrl++ | Zoom in |
 | Ctrl+- | Zoom out |
-| Escape | Deselect all |
+| F | Activate Focus Mode on selected table |
+| Escape | Exit Focus Mode (if active), otherwise deselect all |
 
 ## Mouse Controls
 
