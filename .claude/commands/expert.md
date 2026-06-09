@@ -10,7 +10,7 @@ You are now operating as an expert developer on the **DBML Preview** VS Code ext
 |-------|-------|
 | Nome | `dbml-preview` |
 | Publisher | `JefersonPontes` |
-| Versão | 1.2.2 |
+| Versão | 1.2.3 |
 | Engine mínima | VS Code 1.85.0 |
 | Licença | MIT |
 | Repo | github.com/fcojefersonpontes/dbml-preview |
@@ -57,7 +57,7 @@ VS Code Webview
 - **`dbml-previewer.preview`** → chama `ERDPreviewPanel.createOrShow()`
 - **`dbml-previewer.exportSvg`** → instancia `DBMLParser` + `ERDRenderer`, abre save dialog, grava SVG  
   - ⚠️ **Código morto:** ainda lê `config.get('backgroundColor', '#1e1e1e')` no objeto `options`, mas `RenderOptions` não tem mais esse campo. O TypeScript não reclama porque a variável não é anotada como `RenderOptions` antes de ser passada. O campo é simplesmente ignorado — não causa bug funcional, mas é lixo a remover.
-- **HoverProvider** → ao passar o mouse sobre nome de tabela, exibe tabela markdown com colunas
+- **HoverProvider** → ao passar o mouse sobre nome de tabela no editor, exibe tooltip markdown com: nota da tabela (itálico), tabela `Column | Type | Note` com badges *(PK)*, *(unique)*, *(not null)*, e nota inline da coluna `[note: '...']`
 - **CodeLensProvider** → exibe botão `$(preview) Preview Diagram` no topo de arquivos .dbml
 
 **Ativação:** automática via `languages` em `package.json` (campo `activationEvents` removido na v1.1.0)
@@ -339,7 +339,9 @@ dbml-preview/
 
 1. ~~**`extension.ts` — código morto:**~~ **corrigido na v1.2.2** — `config.get('backgroundColor', '#1e1e1e')` removido do comando `exportSvg`; `RenderOptions` não tem esse campo desde a v1.2.1.
 
-2. **`layout: 'compact'` hardcoded** em `previewPanel.ts` e `extension.ts` — os outros 2 layouts existem em `renderer.ts` mas nunca são expostos via UI ou config.
+2. ~~**HoverProvider mostrava apenas `Column | Type`:**~~ **corrigido na v1.2.3** — tooltip agora exibe nota da tabela, badges de modificadores (PK, unique, not null) e notas inline de colunas `[note: '...']`.
+
+3. **`layout: 'compact'` hardcoded** em `previewPanel.ts` e `extension.ts` — os outros 2 layouts existem em `renderer.ts` mas nunca são expostos via UI ou config.
 
 ---
 
@@ -353,6 +355,7 @@ dbml-preview/
 6. ~~**Configuração de tema**~~ — **implementado na v1.2.0** (CSS variables `--vscode-*` + `--erd-*`, listener `onDidChangeActiveColorTheme`)
 7. ~~**Bug: fundo não respeitava tema**~~ — **corrigido na v1.2.1** (`<rect class="svg-background">` usa `var(--bg-main)`; `backgroundColor` removido de `RenderOptions` e do `package.json`; ver `docs/fix-theme-background.md`)
 8. ~~**Limpeza:** remover `backgroundColor` morto de `extension.ts:50`~~ — **feito na v1.2.2**
+9. ~~**Hover sem documentação de colunas:**~~ — **corrigido na v1.2.3** — tooltip exibe nota da tabela + tabela `Column | Type | Note` completa com modificadores e notas de coluna
 
 ---
 
