@@ -31,6 +31,23 @@ export interface TableLayoutInfo {
   group?: string;
 }
 
+const COMPOSITE_REF_ACCENTS = ['#ab47bc', '#26a69a', '#ff7043', '#5c6bc0', '#ec407a', '#8d6e63'];
+
+export function isCompositeRef(ref: Ref): boolean {
+  return ref.fromColumns.length > 1 || ref.toColumns.length > 1;
+}
+
+export function getRefVisualMetadata(ref: Ref, index: number): { id: string; composite: boolean; accent: string; paletteIndex: number } {
+  const composite = isCompositeRef(ref);
+  const paletteIndex = index % COMPOSITE_REF_ACCENTS.length;
+  return {
+    id: `ref-${index}`,
+    composite,
+    accent: composite ? COMPOSITE_REF_ACCENTS[paletteIndex] : '#64b5f6',
+    paletteIndex
+  };
+}
+
 export class ERDRenderer {
   private options: RenderOptions;
   private tablePositions: Map<string, Position> = new Map();
@@ -432,6 +449,17 @@ export class ERDRenderer {
       Array.from(this.tablePositions.entries()).map(([name, pos]) => ({ name, ...pos }))
     );
 
+    const compositeMarkerDefs = COMPOSITE_REF_ACCENTS.map((accent, index) => {
+      return `
+    <marker id="many-crow-composite-${index}" markerWidth="20" markerHeight="20" refX="18" refY="10" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,10 L18,2 M0,10 L18,10 M0,10 L18,18" stroke="${accent}" stroke-width="2" fill="none" stroke-linecap="round"/>
+    </marker>
+    <marker id="one-line-composite-${index}" markerWidth="16" markerHeight="20" refX="14" refY="10" orient="auto" markerUnits="userSpaceOnUse">
+      <line x1="4" y1="2" x2="4" y2="18" stroke="${accent}" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="12" y1="2" x2="12" y2="18" stroke="${accent}" stroke-width="2.5" stroke-linecap="round"/>
+    </marker>`;
+    }).join('');
+
     let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" data-positions='${positionsJson}'>
   <defs>
     <style>
@@ -442,6 +470,10 @@ export class ERDRenderer {
       .column-type { font-family: 'Segoe UI', 'SF Pro Display', Arial, sans-serif; font-size: 10px; fill: var(--erd-text-muted, #888); }
       .pk-icon { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9px; fill: #ffd700; font-weight: bold; }
       .fk-icon { font-family: 'Segoe UI', Arial, sans-serif; font-size: 9px; fill: #64b5f6; font-weight: bold; }
+      .composite-fk-icon { fill: var(--composite-accent); font-size: 8px; letter-spacing: .2px; }
+      .composite-ref-swatch { cursor: pointer; stroke: var(--erd-table-bg, #2a2a2a); stroke-width: 1; }
+      .column-highlight { fill: var(--composite-highlight, transparent); stroke: var(--composite-highlight, transparent); stroke-width: 1; opacity: 0; pointer-events: none; }
+      .column.composite-highlighted .column-highlight { opacity: .2; }
       .group-label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; fill: var(--erd-text-muted, #aaa); font-weight: 500; }
       .relation-line { stroke-width: 2; fill: none; }
       .cardinality-label { font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; font-weight: bold; }
@@ -472,6 +504,8 @@ export class ERDRenderer {
       <line x1="4" y1="2" x2="4" y2="18" stroke="#64b5f6" stroke-width="2.5" stroke-linecap="round"/>
       <line x1="12" y1="2" x2="12" y2="18" stroke="#64b5f6" stroke-width="2.5" stroke-linecap="round"/>
     </marker>
+    ${compositeMarkerDefs}
+
     
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
@@ -580,12 +614,18 @@ export class ERDRenderer {
     if (!pos) return '';
     
     const fkColumns = new Set<string>();
+    const scalarFkColumns = new Set<string>();
     for (const ref of refs) {
       if (ref.fromTable === table.name) {
-        fkColumns.add(ref.fromColumn);
+        ref.fromColumns.forEach(column => fkColumns.add(column));
+        if (!isCompositeRef(ref)) ref.fromColumns.forEach(column => scalarFkColumns.add(column));
       }
     }
 
+
+    const compositeMemberships = refs
+      .map((ref, index) => ({ ref, ...getRefVisualMetadata(ref, index) }))
+      .filter(item => item.composite && (item.ref.fromTable === table.name || item.ref.toTable === table.name));
     let svg = `
     <g class="table draggable" data-table="${table.name}" transform="translate(0,0)">
       <rect class="table-bg" x="${pos.x}" y="${pos.y}" width="${pos.width}" height="${pos.height}"
@@ -607,15 +647,25 @@ export class ERDRenderer {
       const column = table.columns[i];
       const isPK = column.pk;
       const isFK = fkColumns.has(column.name);
+      const isScalarFK = scalarFkColumns.has(column.name);
       const isLast = i === table.columns.length - 1;
       
+      const columnCompositeRefs = compositeMemberships.filter(item =>
+        (item.ref.fromTable === table.name && item.ref.fromColumns.includes(column.name)) ||
+        (item.ref.toTable === table.name && item.ref.toColumns.includes(column.name))
+      );
+      const sourceCompositeRefs = columnCompositeRefs.filter(item =>
+        item.ref.fromTable === table.name && item.ref.fromColumns.includes(column.name)
+      );
+      const isCompositeFK = sourceCompositeRefs.length > 0;
       if (i % 2 === 1) {
         svg += `
       <rect class="col-row-alt" x="${pos.x + 2}" y="${y - 2}" width="${pos.width - 4}" height="${this.rowHeight}" rx="2"/>`;
       }
       
       svg += `
-      <g class="column" data-table="${table.name}" data-column="${column.name}">`;
+      <g class="column${columnCompositeRefs.length > 0 ? ' composite-column' : ''}" data-table="${table.name}" data-column="${column.name}"${columnCompositeRefs.length > 0 ? ` data-composite-refs="${columnCompositeRefs.map(item => item.id).join(' ')}"` : ''}>
+        <rect class="column-highlight" x="${pos.x + 2}" y="${y - 2}" width="${pos.width - 4}" height="${this.rowHeight}" rx="2"/>`;
       
       let iconOffset = pos.x + 10;
       
@@ -626,9 +676,21 @@ export class ERDRenderer {
       }
       
       if (isFK) {
-        svg += `
+        if (isCompositeFK) {
+          const compositeAccent = sourceCompositeRefs.length === 1 ? sourceCompositeRefs[0].accent : '#bdbdbd';
+          const compositeLabel = isScalarFK ? 'FK+CFK' : 'CFK';
+          const badgeWidth = isScalarFK ? 40 : 24;
+          const swatches = sourceCompositeRefs.length > 1
+            ? sourceCompositeRefs.map((item, index) => `<circle cx="${iconOffset + badgeWidth - 5 + index * 5}" cy="${y + 10}" r="2" fill="${item.accent}" class="composite-ref-swatch" data-ref-id="${item.id}"/>`).join('')
+            : '';
+          svg += `
+        <text x="${iconOffset}" y="${y + 13}" class="fk-icon composite-fk-icon" data-composite-refs="${sourceCompositeRefs.map(item => item.id).join(' ')}" style="--composite-accent:${compositeAccent}">${compositeLabel}</text>${swatches}`;
+          iconOffset += badgeWidth + (sourceCompositeRefs.length > 1 ? sourceCompositeRefs.length * 5 : 0);
+        } else {
+          svg += `
         <text x="${iconOffset}" y="${y + 13}" class="fk-icon">🔗</text>`;
-        iconOffset += 18;
+          iconOffset += 18;
+        }
       }
       
       if (!isPK && !isFK) iconOffset += 4;
@@ -653,8 +715,12 @@ export class ERDRenderer {
   }
 
   private renderRelationship(ref: Ref, schema: DBMLSchema): string {
-    const fromColPos = this.columnPositions.get(`${ref.fromTable}.${ref.fromColumn}`);
-    const toColPos = this.columnPositions.get(`${ref.toTable}.${ref.toColumn}`);
+    const fromColumn = ref.fromColumns[0];
+    const toColumn = ref.toColumns[0];
+    const fromColPos = this.columnPositions.get(`${ref.fromTable}.${fromColumn}`);
+    const refIndex = schema.refs.indexOf(ref);
+    const visual = getRefVisualMetadata(ref, refIndex);
+    const toColPos = this.columnPositions.get(`${ref.toTable}.${toColumn}`);
     const fromTablePos = this.tablePositions.get(ref.fromTable);
     const toTablePos = this.tablePositions.get(ref.toTable);
     
@@ -709,8 +775,9 @@ export class ERDRenderer {
     const path = `M ${fromX} ${fromY} C ${cp1x} ${fromY}, ${cp2x} ${toY}, ${toX} ${toY}`;
     
     // Determine marker based on cardinality
-    const startMarker = ref.fromRelation === '*' ? 'url(#many-crow)' : 'url(#one-line)';
-    const endMarker = ref.toRelation === '*' ? 'url(#many-crow)' : 'url(#one-line)';
+    const markerSuffix = visual.composite ? `-composite-${visual.paletteIndex}` : '';
+    const startMarker = ref.fromRelation === '*' ? `url(#many-crow${markerSuffix})` : `url(#one-line${markerSuffix})`;
+    const endMarker = ref.toRelation === '*' ? `url(#many-crow${markerSuffix})` : `url(#one-line${markerSuffix})`;
     
     const fromCardLabel = ref.fromRelation === '*' ? 'N' : '1';
     const toCardLabel = ref.toRelation === '*' ? 'N' : '1';
@@ -721,23 +788,26 @@ export class ERDRenderer {
     const labelOffsetY = -12;
     
     return `
-    <g class="relationship" data-from="${ref.fromTable}.${ref.fromColumn}" data-to="${ref.toTable}.${ref.toColumn}"
-       data-from-table="${ref.fromTable}" data-to-table="${ref.toTable}">
-      <path d="${path}" class="relation-line" stroke="#64b5f6" stroke-opacity="0.6" stroke-width="2"
+    <g class="relationship${visual.composite ? ' composite-relationship' : ''}" data-from="${ref.fromTable}.${fromColumn}" data-to="${ref.toTable}.${toColumn}"
+       data-from-table="${ref.fromTable}" data-to-table="${ref.toTable}"
+       data-ref-id="${visual.id}" data-composite="${visual.composite}" data-accent="${visual.accent}"
+       data-from-columns="${ref.fromColumns.join(',')}" data-to-columns="${ref.toColumns.join(',')}"
+       style="--constraint-accent:${visual.accent}">
+      <path d="${path}" class="relation-line" stroke="${visual.accent}" stroke-opacity="${visual.composite ? '0.75' : '0.6'}" stroke-width="${visual.composite ? '2.5' : '2'}"
             marker-start="${startMarker}" marker-end="${endMarker}"/>
       <path d="${path}" stroke="transparent" stroke-width="20" fill="none" class="relation-hover-target"/>
       
       <!-- From cardinality label with background -->
       <rect x="${fromLabelX - 12}" y="${fromY + labelOffsetY - 12}" width="24" height="20" rx="4"
-            class="cardinality-bg" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
+            class="cardinality-bg" stroke="${visual.accent}" stroke-width="1" opacity="0.9"/>
       <text x="${fromLabelX}" y="${fromY + labelOffsetY + 2}" text-anchor="middle"
-            class="cardinality-label" fill="#64b5f6">${fromCardLabel}</text>
+            class="cardinality-label" fill="${visual.accent}">${fromCardLabel}</text>
 
       <!-- To cardinality label with background -->
       <rect x="${toLabelX - 12}" y="${toY + labelOffsetY - 12}" width="24" height="20" rx="4"
-            class="cardinality-bg" stroke="#64b5f6" stroke-width="1" opacity="0.9"/>
+            class="cardinality-bg" stroke="${visual.accent}" stroke-width="1" opacity="0.9"/>
       <text x="${toLabelX}" y="${toY + labelOffsetY + 2}" text-anchor="middle"
-            class="cardinality-label" fill="#64b5f6">${toCardLabel}</text>
+            class="cardinality-label" fill="${visual.accent}">${toCardLabel}</text>
     </g>`;
   }
 }
