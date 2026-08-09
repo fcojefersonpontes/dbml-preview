@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DBMLParser, DBMLSchema } from './parser';
-import { ERDRenderer, RenderOptions } from './renderer';
+import { ERDRenderer, RenderOptions, getRefVisualMetadata } from './renderer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -210,13 +210,17 @@ export class ERDPreviewPanel {
       if (schemaName) tableListHtml += `</div></div>`;
     }
 
-    const refList = schema.refs.map(r => {
+    const refList = schema.refs.map((r, index) => {
       const fc = r.fromRelation === '*' ? 'N' : '1';
       const tc = r.toRelation === '*' ? 'N' : '1';
-      return `<div class="ref-item" data-from="${r.fromTable}.${r.fromColumn}" data-to="${r.toTable}.${r.toColumn}">
+      const visual = getRefVisualMetadata(r, index);
+      const fromColumns = r.fromColumns.length > 1 ? `(${r.fromColumns.join(', ')})` : r.fromColumns[0];
+      const toColumns = r.toColumns.length > 1 ? `(${r.toColumns.join(', ')})` : r.toColumns[0];
+      return `<div class="ref-item${visual.composite ? ' composite-ref-item' : ''}" data-ref-id="${visual.id}" style="--constraint-accent:${visual.accent}">
         <div class="ref-tables"><span class="ref-table">${r.fromTable}</span>
         <span class="ref-card">${fc}:${tc}</span><span class="ref-table">${r.toTable}</span></div>
-        <div class="ref-cols"><span>${r.fromColumn}</span><span class="arr">→</span><span>${r.toColumn}</span></div>
+        ${visual.composite ? '<span class="composite-badge">COMPOSITE</span>' : ''}
+        <div class="ref-cols"><span>${fromColumns}</span><span class="arr">→</span><span>${toColumns}</span></div>
       </div>`;
     }).join('');
 
@@ -227,7 +231,16 @@ export class ERDPreviewPanel {
     }));
     const groupsData = JSON.stringify(normalizedGroups);
     const savedPositionsData = JSON.stringify(this._savedPositions || {});
-    const schemaRefsData = JSON.stringify(schema.refs.map(r => ({ fromTable: r.fromTable, toTable: r.toTable })));
+    const schemaRefsData = JSON.stringify(schema.refs.map((r, index) => {
+      const visual = getRefVisualMetadata(r, index);
+      return {
+        ...visual,
+        fromTable: r.fromTable,
+        fromColumns: r.fromColumns,
+        toTable: r.toTable,
+        toColumns: r.toColumns
+      };
+    }));
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -295,6 +308,9 @@ export class ERDPreviewPanel {
     .ref-card{font-size:9px;background:var(--border);padding:2px 5px;border-radius:3px;color:#ffd700;font-weight:bold}
     .ref-cols{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--fg-muted)}
     .arr{color:#64b5f6}
+    .composite-ref-item{border-left:3px solid var(--constraint-accent);padding-left:7px}
+    .composite-badge{font-size:8px;font-weight:700;letter-spacing:.5px;color:var(--constraint-accent);border:1px solid var(--constraint-accent);border-radius:3px;padding:1px 4px;margin:1px 0 4px}
+    .ref-item.constraint-highlighted{outline:1px solid var(--constraint-accent);background:var(--hover)}
     .main-content{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
     .toolbar{display:flex;align-items:center;padding:6px 12px;background:var(--bg-side);border-bottom:1px solid var(--border);gap:6px;flex-shrink:0}
     .toolbar button{background:var(--accent);color:var(--accent-fg);border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-size:11px;display:flex;align-items:center;gap:4px;white-space:nowrap}
@@ -322,13 +338,14 @@ export class ERDPreviewPanel {
     .canvas svg .relationship{cursor:pointer}
     .canvas svg .relationship:hover .relation-line{stroke:#90caf9!important;stroke-opacity:1!important;stroke-width:3!important}
     .canvas svg .relationship.highlighted .relation-line{stroke:#ffd700!important;stroke-opacity:1!important;stroke-width:3!important}
+    .canvas svg .relationship.composite-relationship.constraint-highlighted .relation-line,.canvas svg .relationship.composite-relationship.highlighted .relation-line{stroke:var(--constraint-accent)!important;stroke-opacity:1!important;stroke-width:4!important;filter:url(#glow)}
     .stats{padding:6px 12px;background:var(--bg-side);border-top:1px solid var(--border);font-size:10px;color:var(--fg-muted);display:flex;gap:16px;flex-shrink:0}
     .stat-item{display:flex;align-items:center;gap:4px}
     .stat-value{color:var(--fg-main);font-weight:600}
     .tooltip{position:fixed;background:var(--tooltip-bg);color:var(--fg-main);padding:6px 10px;border-radius:4px;font-size:11px;pointer-events:none;z-index:1000;display:none;max-width:250px;border:1px solid var(--border)}
     .tooltip.visible{display:block}
     .tooltip-title{font-weight:600;margin-bottom:2px}
-    .tooltip-content{color:var(--fg-muted);font-size:10px}
+    .tooltip-content{color:var(--fg-muted);font-size:10px;white-space:pre-line}
     .save-status{font-size:10px;margin-left:4px}
     .save-status.saved{color:#4caf50}
     .save-status.unsaved{color:#ff9800}
@@ -427,6 +444,92 @@ export class ERDPreviewPanel {
       const groups = ${groupsData};
       const savedPositions = ${savedPositionsData};
       const schemaRefs = ${schemaRefsData};
+      const refsById = new Map(schemaRefs.map(ref => [ref.id, ref]));
+      let pinnedCompositeRefIds = [];
+      let hoveredCompositeRefIds = [];
+
+      function normalizeCompositeRefIds(ids) {
+        return Array.from(new Set(ids)).filter(id => {
+          const ref = refsById.get(id);
+          return ref && ref.composite;
+        });
+      }
+
+      function sameRefIds(left, right) {
+        return left.length === right.length && left.every((id, index) => id === right[index]);
+      }
+
+      function getCompositeMapping(ref) {
+        return ref.fromTable + '.(' + ref.fromColumns.join(', ') + ') → ' +
+          ref.toTable + '.(' + ref.toColumns.join(', ') + ')';
+      }
+
+      function clearCompositeHighlights() {
+        canvas.querySelectorAll('.column.composite-highlighted').forEach(column => {
+          column.classList.remove('composite-highlighted');
+          column.style.removeProperty('--composite-highlight');
+        });
+        canvas.querySelectorAll('.relationship.constraint-highlighted')
+          .forEach(rel => rel.classList.remove('constraint-highlighted'));
+        document.querySelectorAll('.ref-item.constraint-highlighted')
+          .forEach(item => item.classList.remove('constraint-highlighted'));
+      }
+
+      function renderCompositeHighlights() {
+        clearCompositeHighlights();
+        const activeIds = hoveredCompositeRefIds.length > 0 ? hoveredCompositeRefIds : pinnedCompositeRefIds;
+        activeIds.forEach(id => {
+          const ref = refsById.get(id);
+          if (!ref || !ref.composite) return;
+          const rel = canvas.querySelector('.relationship[data-ref-id="' + id + '"]');
+          const item = document.querySelector('.ref-item[data-ref-id="' + id + '"]');
+          if (rel) rel.classList.add('constraint-highlighted');
+          if (item) item.classList.add('constraint-highlighted');
+          canvas.querySelectorAll('.column[data-composite-refs~="' + id + '"]').forEach(column => {
+            column.classList.add('composite-highlighted');
+            if (!column.style.getPropertyValue('--composite-highlight')) {
+              column.style.setProperty('--composite-highlight', ref.accent);
+            }
+          });
+        });
+      }
+
+      function setHoveredCompositeRefs(ids) {
+        const normalized = normalizeCompositeRefIds(ids);
+        if (sameRefIds(normalized, hoveredCompositeRefIds)) return;
+        hoveredCompositeRefIds = normalized;
+        renderCompositeHighlights();
+      }
+
+      function pinCompositeRefs(ids) {
+        pinnedCompositeRefIds = normalizeCompositeRefIds(ids);
+        canvas.querySelectorAll('.table.selected').forEach(table => table.classList.remove('selected'));
+        document.querySelectorAll('.table-item.highlighted').forEach(item => item.classList.remove('highlighted'));
+        canvas.querySelectorAll('.relationship.highlighted').forEach(rel => rel.classList.remove('highlighted'));
+        pinnedCompositeRefIds.forEach(id => {
+          const rel = canvas.querySelector('.relationship[data-ref-id="' + id + '"]');
+          if (rel) rel.classList.add('highlighted');
+        });
+        renderCompositeHighlights();
+      }
+
+      function clearCompositeSelection() {
+        pinnedCompositeRefIds = [];
+        hoveredCompositeRefIds = [];
+        clearCompositeHighlights();
+      }
+
+      function compositeIdsFromColumn(column) {
+        return column && column.dataset.compositeRefs
+          ? column.dataset.compositeRefs.split(/\\s+/).filter(Boolean)
+          : [];
+      }
+
+      function compositeTooltip(ids) {
+        return normalizeCompositeRefIds(ids)
+          .map(id => getCompositeMapping(refsById.get(id)))
+          .join('\\n');
+      }
 
       // --- Focus Mode state ---
       let focusState = null; // null = normal mode; { focalTable, depth } when active
@@ -1027,17 +1130,38 @@ export class ERDPreviewPanel {
       
       canvas.addEventListener('click', function(e) {
         if (isDraggingTable || isDraggingGroup) return;
+
+        const swatch = e.target.closest('.composite-ref-swatch');
+        if (swatch) {
+          pinCompositeRefs([swatch.dataset.refId]);
+          return;
+        }
+
+        const badge = e.target.closest('.composite-fk-icon');
+        if (badge) {
+          pinCompositeRefs((badge.dataset.compositeRefs || '').split(/\\s+/).filter(Boolean));
+          return;
+        }
+
         const table = e.target.closest('.table');
         if (table) {
-          selectTable(table.dataset.table);
           const col = e.target.closest('.column');
+          const compositeIds = compositeIdsFromColumn(col);
+          if (compositeIds.length > 0) pinCompositeRefs(compositeIds);
+          else selectTable(table.dataset.table);
           if (col) vscode.postMessage({ command: 'goToColumn', tableName: table.dataset.table, columnName: col.dataset.column });
           return;
         }
+
         const rel = e.target.closest('.relationship');
         if (rel) {
-          canvas.querySelectorAll('.relationship.highlighted').forEach(r => r.classList.remove('highlighted'));
-          rel.classList.add('highlighted');
+          if (rel.dataset.composite === 'true') {
+            pinCompositeRefs([rel.dataset.refId]);
+          } else {
+            clearCompositeSelection();
+            canvas.querySelectorAll('.relationship.highlighted').forEach(r => r.classList.remove('highlighted'));
+            rel.classList.add('highlighted');
+          }
         }
       });
       
@@ -1053,13 +1177,30 @@ export class ERDPreviewPanel {
       
       document.querySelectorAll('.ref-item').forEach(item => {
         item.addEventListener('click', function() {
-          const rel = canvas.querySelector('.relationship[data-from="' + this.dataset.from + '"][data-to="' + this.dataset.to + '"]');
-          canvas.querySelectorAll('.relationship.highlighted').forEach(r => r.classList.remove('highlighted'));
-          if (rel) rel.classList.add('highlighted');
+          const rel = canvas.querySelector('.relationship[data-ref-id="' + this.dataset.refId + '"]');
+          if (!rel) return;
+          if (rel.dataset.composite === 'true') {
+            pinCompositeRefs([this.dataset.refId]);
+          } else {
+            clearCompositeSelection();
+            canvas.querySelectorAll('.relationship.highlighted').forEach(r => r.classList.remove('highlighted'));
+            rel.classList.add('highlighted');
+          }
+        });
+        item.addEventListener('mouseenter', function(e) {
+          const ref = refsById.get(this.dataset.refId);
+          if (!ref || !ref.composite) return;
+          setHoveredCompositeRefs([ref.id]);
+          showTooltip(e, 'Composite FK', getCompositeMapping(ref));
+        });
+        item.addEventListener('mouseleave', function() {
+          setHoveredCompositeRefs([]);
+          hideTooltip();
         });
       });
       
       function selectTable(name) {
+        clearCompositeSelection();
         canvas.querySelectorAll('.table.selected').forEach(t => t.classList.remove('selected'));
         document.querySelectorAll('.table-item.highlighted').forEach(t => t.classList.remove('highlighted'));
         canvas.querySelectorAll('.relationship.highlighted').forEach(r => r.classList.remove('highlighted'));
@@ -1082,18 +1223,53 @@ export class ERDPreviewPanel {
       }
       
       canvas.addEventListener('mousemove', function(e) {
-        if (isDraggingTable || isDraggingGroup) { hideTooltip(); return; }
+        if (isDraggingTable || isDraggingGroup) {
+          setHoveredCompositeRefs([]);
+          hideTooltip();
+          return;
+        }
+
+        const swatch = e.target.closest('.composite-ref-swatch');
+        const badge = e.target.closest('.composite-fk-icon');
         const col = e.target.closest('.column');
         const table = e.target.closest('.table');
         const group = e.target.closest('.table-group');
         const rel = e.target.closest('.relationship');
-        if (col) showTooltip(e, col.dataset.table + '.' + col.dataset.column, 'Click to go to definition');
-        else if (table) showTooltip(e, table.dataset.table, 'Drag to move · Shift+drag moves group');
-        else if (group && !table) showTooltip(e, 'Group: ' + group.dataset.group, 'Drag to move entire group');
-        else if (rel) showTooltip(e, (rel.dataset.from || '') + ' → ' + (rel.dataset.to || ''), 'Click to highlight');
-        else hideTooltip();
+
+        let compositeIds = [];
+        if (swatch) compositeIds = [swatch.dataset.refId];
+        else if (badge) compositeIds = (badge.dataset.compositeRefs || '').split(/\\s+/).filter(Boolean);
+        else if (col) compositeIds = compositeIdsFromColumn(col);
+        else if (rel && rel.dataset.composite === 'true') compositeIds = [rel.dataset.refId];
+
+        setHoveredCompositeRefs(compositeIds);
+
+        if (compositeIds.length > 0) {
+          const isSourceColumn = col && compositeIds.some(id => {
+            const ref = refsById.get(id);
+            return ref && ref.fromTable === col.dataset.table && ref.fromColumns.includes(col.dataset.column);
+          });
+          const isAlsoScalarFK = col && schemaRefs.some(ref =>
+            !ref.composite && ref.fromTable === col.dataset.table && ref.fromColumns.includes(col.dataset.column)
+          );
+          const tooltipTitle = isSourceColumn ? (isAlsoScalarFK ? 'Scalar + composite FK' : 'Composite FK') : 'Composite FK target';
+          showTooltip(e, tooltipTitle, compositeTooltip(compositeIds));
+        } else if (col) {
+          showTooltip(e, col.dataset.table + '.' + col.dataset.column, 'Click to go to definition');
+        } else if (table) {
+          showTooltip(e, table.dataset.table, 'Drag to move · Shift+drag moves group');
+        } else if (group && !table) {
+          showTooltip(e, 'Group: ' + group.dataset.group, 'Drag to move entire group');
+        } else if (rel) {
+          showTooltip(e, (rel.dataset.from || '') + ' → ' + (rel.dataset.to || ''), 'Click to highlight');
+        } else {
+          hideTooltip();
+        }
       });
-      canvas.addEventListener('mouseleave', hideTooltip);
+      canvas.addEventListener('mouseleave', function() {
+        setHoveredCompositeRefs([]);
+        hideTooltip();
+      });
       
       function showTooltip(e, title, content) {
         tooltip.querySelector('.tooltip-title').textContent = title;
@@ -1111,6 +1287,7 @@ export class ERDPreviewPanel {
         else if ((e.ctrlKey || e.metaKey) && e.key === '0') { e.preventDefault(); fitToScreen(); }
         else if (e.key === 'Escape') {
           if (focusState) { exitFocusMode(); return; }
+          clearCompositeSelection();
           canvas.querySelectorAll('.table.selected, .relationship.highlighted').forEach(el => el.classList.remove('selected', 'highlighted'));
           document.querySelectorAll('.table-item.highlighted').forEach(t => t.classList.remove('highlighted'));
         } else if (e.key === 'f' || e.key === 'F') {

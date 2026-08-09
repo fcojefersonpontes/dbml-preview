@@ -30,9 +30,9 @@ export interface Index {
 export interface Ref {
   name?: string;
   fromTable: string;
-  fromColumn: string;
+  fromColumns: string[];
   toTable: string;
-  toColumn: string;
+  toColumns: string[];
   fromRelation: '1' | '*';
   toRelation: '1' | '*';
   onDelete?: string;
@@ -387,9 +387,9 @@ export class DBMLParser {
               
               refs.push({
                 fromTable: table.name,
-                fromColumn: columnName,
+                fromColumns: [columnName],
                 toTable: targetTable,
-                toColumn: targetColumn,
+                toColumns: [targetColumn],
                 fromRelation,
                 toRelation
               });
@@ -400,8 +400,15 @@ export class DBMLParser {
     }
     
     // Also parse standalone Ref statements
-    const refRegex = /Ref\s*(?:(\w+)\s*)?:\s*((?:\w+\.)?\w+)\.(\w+)\s*([<>\-])\s*((?:\w+\.)?\w+)\.(\w+)/gi;
+    const columnListPattern = String.raw`(?:\w+|\(\s*\w+(?:\s*,\s*\w+)+\s*\))`;
+    const refRegex = new RegExp(
+      String.raw`Ref\s*(?:(\w+)\s*)?:\s*((?:\w+\.)?\w+)\.(${columnListPattern})\s*([<>\-])\s*((?:\w+\.)?\w+)\.(${columnListPattern})`,
+      'gi'
+    );
     let refMatch;
+
+    const parseColumnList = (value: string): string[] =>
+      value.replace(/^\(|\)$/g, '').split(',').map(column => column.trim());
     
     while ((refMatch = refRegex.exec(cleanContent)) !== null) {
       const relationType = refMatch[4];
@@ -432,9 +439,9 @@ export class DBMLParser {
       refs.push({
         name: refMatch[1],
         fromTable: fromTable,
-        fromColumn: refMatch[3],
+        fromColumns: parseColumnList(refMatch[3]),
         toTable: toTable,
-        toColumn: refMatch[6],
+        toColumns: parseColumnList(refMatch[6]),
         fromRelation,
         toRelation
       });
